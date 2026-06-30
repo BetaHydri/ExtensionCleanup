@@ -1,6 +1,9 @@
 # Local Pester run logs (Start-Process detached output)
 output/
 
+# Memory Bank (local-only project knowledge, not for the repo)
+.memory-bank/
+
 # Editor / OS
 .vscode/
 Thumbs.db
