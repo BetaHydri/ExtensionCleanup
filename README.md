@@ -1,4 +1,4 @@
-# ExtensionCleanup
+# Microsoft Edge ExtensionCleanup
 
 PowerShell-Skript zum Bereinigen von Edge-Extension-Verweisen in den
 Profildateien eines Benutzers.
