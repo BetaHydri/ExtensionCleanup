@@ -24,15 +24,15 @@ Describe 'ExtensionCleanup.ps1' {
             }
 
             $prefs = [ordered]@{
-                browser = [ordered]@{
+                browser    = [ordered]@{
                     last_known_google_url = 'https://example.invalid'
                 }
                 extensions = [ordered]@{
-                    settings = [ordered]@{
+                    settings          = [ordered]@{
                         $script:InstalledId = [ordered]@{ name = 'Installed' }
                     }
                     pinned_extensions = @($script:InstalledId)
-                    toolbar = @($script:InstalledId)
+                    toolbar           = @($script:InstalledId)
                 }
             }
             if ($IncludeOrphans) {
@@ -57,7 +57,7 @@ Describe 'ExtensionCleanup.ps1' {
                 $secure.protection.macs.extensions.settings[$script:OrphanId] = 'mac-orphan'
             }
 
-            ($prefs  | ConvertTo-Json -Depth 10) | Set-Content -LiteralPath (Join-Path $profileDir 'Preferences')        -Encoding UTF8
+            ($prefs | ConvertTo-Json -Depth 10) | Set-Content -LiteralPath (Join-Path $profileDir 'Preferences')        -Encoding UTF8
             ($secure | ConvertTo-Json -Depth 10) | Set-Content -LiteralPath (Join-Path $profileDir 'Secure Preferences') -Encoding UTF8
 
             return $profileDir
@@ -134,11 +134,11 @@ Describe 'ExtensionCleanup.ps1' {
         BeforeAll {
             $script:UserData2 = Join-Path $TestDrive 'MultiExplicit'
             $script:Def2 = New-MockProfile -Root $script:UserData2 -ProfileFolder 'Default' -IncludeOrphans
-            $script:P1   = New-MockProfile -Root $script:UserData2 -ProfileFolder 'Profile 1' -IncludeOrphans
-            $null        = New-MockProfile -Root $script:UserData2 -ProfileFolder 'Profile 2' -IncludeOrphans
+            $script:P1 = New-MockProfile -Root $script:UserData2 -ProfileFolder 'Profile 1' -IncludeOrphans
+            $null = New-MockProfile -Root $script:UserData2 -ProfileFolder 'Profile 2' -IncludeOrphans
             $script:LogFile2 = Join-Path $TestDrive 'multi-explicit.log'
 
-            & $script:ScriptPath -UserDataPath $script:UserData2 -ProfileName 'Default','Profile 1' -LogPath $script:LogFile2
+            & $script:ScriptPath -UserDataPath $script:UserData2 -ProfileName 'Default', 'Profile 1' -LogPath $script:LogFile2
         }
 
         It 'cleans the named profiles' {
@@ -168,7 +168,7 @@ Describe 'ExtensionCleanup.ps1' {
         BeforeAll {
             $script:UserData3 = Join-Path $TestDrive 'AllProfiles'
             $script:DefA = New-MockProfile -Root $script:UserData3 -ProfileFolder 'Default' -IncludeOrphans
-            $script:P1A  = New-MockProfile -Root $script:UserData3 -ProfileFolder 'Profile 1' -IncludeOrphans
+            $script:P1A = New-MockProfile -Root $script:UserData3 -ProfileFolder 'Profile 1' -IncludeOrphans
             $script:SysA = New-MockProfile -Root $script:UserData3 -ProfileFolder 'System Profile' -IncludeOrphans
             $script:GstA = New-MockProfile -Root $script:UserData3 -ProfileFolder 'Guest Profile' -IncludeOrphans
             # Cache-style folder without Preferences must be ignored
