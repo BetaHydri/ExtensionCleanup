@@ -80,6 +80,23 @@ Entfernt alle Extension-ID-Verweise in beiden Dateien:
   -ExtensionsPath 'D:\Profiles\Edge\Default\Extensions'
 ```
 
+### 4) Lauf mit eigener Logdatei
+
+Schreibt das vollständige Lauf-Protokoll in eine eigene Datei statt in
+`%TEMP%`:
+
+```powershell
+.\ExtensionCleanup.ps1 -LogPath 'D:\Logs\EdgeCleanup\Cleanup.log'
+```
+
+Lässt sich beliebig mit den anderen Parametern kombinieren, z. B.:
+
+```powershell
+.\ExtensionCleanup.ps1 `
+  -RemoveAllExtensionReferences `
+  -LogPath "D:\Logs\EdgeCleanup\$env:USERNAME-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+```
+
 ## Einsatz auf Terminalservern beim Abmelden
 
 Auf RDS-/Terminalservern kann das Skript beim Benutzer-Logoff ausgeführt
@@ -93,7 +110,8 @@ weil `$env:LOCALAPPDATA` automatisch auf das aktuelle Benutzerprofil zeigt.
 ```powershell
 & 'C:\Program Files\PowerShell\7\pwsh.exe' `
   -NoProfile -ExecutionPolicy Bypass -File `
-  'C:\Scripts\ExtensionCleanup\ExtensionCleanup.ps1'
+  'C:\Scripts\ExtensionCleanup\ExtensionCleanup.ps1' `
+  -LogPath "\\fileserver\Logs$\EdgeCleanup\$env:USERNAME-$env:COMPUTERNAME-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 ```
 
 Optional im Vollmodus:
@@ -102,7 +120,8 @@ Optional im Vollmodus:
 & 'C:\Program Files\PowerShell\7\pwsh.exe' `
   -NoProfile -ExecutionPolicy Bypass -File `
   'C:\Scripts\ExtensionCleanup\ExtensionCleanup.ps1' `
-  -RemoveAllExtensionReferences
+  -RemoveAllExtensionReferences `
+  -LogPath "\\fileserver\Logs$\EdgeCleanup\$env:USERNAME-$env:COMPUTERNAME-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 ```
 
 ### Variante B: Zentraler Aufruf für ein bestimmtes Benutzerprofil
@@ -116,29 +135,37 @@ $userRoot = 'C:\Users\Max.Mustermann\AppData\Local\Microsoft\Edge\User Data\Defa
 .\ExtensionCleanup.ps1 `
   -PreferencesPath (Join-Path $userRoot 'Preferences') `
   -SecurePreferencesPath (Join-Path $userRoot 'Secure Preferences') `
-  -ExtensionsPath (Join-Path $userRoot 'Extensions')
+  -ExtensionsPath (Join-Path $userRoot 'Extensions') `
+  -LogPath "C:\ProgramData\EdgeCleanup\Max.Mustermann-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 ```
 
 ### Variante C: Mehrere Profile in einer Logoff-/Cleanup-Routine
 
 Beispiel für eine zentrale Routine (z. B. täglicher Task), die mehrere
-lokale Benutzerprofile verarbeitet:
+lokale Benutzerprofile verarbeitet und pro Profil eine eigene Logdatei
+schreibt:
 
 ```powershell
+$logRoot = 'C:\ProgramData\EdgeCleanup\Logs'
+New-Item -Path $logRoot -ItemType Directory -Force | Out-Null
+$timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+
 $roots = Get-ChildItem 'C:\Users' -Directory |
   Where-Object { $_.Name -notin @('Public', 'Default', 'Default User', 'All Users') } |
-  ForEach-Object { Join-Path $_.FullName 'AppData\Local\Microsoft\Edge\User Data\Default' }
+  ForEach-Object { [pscustomobject]@{ User = $_.Name; Path = Join-Path $_.FullName 'AppData\Local\Microsoft\Edge\User Data\Default' } }
 
-foreach ($root in $roots) {
-  $pref = Join-Path $root 'Preferences'
-  $securePref = Join-Path $root 'Secure Preferences'
-  $ext = Join-Path $root 'Extensions'
+foreach ($entry in $roots) {
+  $pref = Join-Path $entry.Path 'Preferences'
+  $securePref = Join-Path $entry.Path 'Secure Preferences'
+  $ext = Join-Path $entry.Path 'Extensions'
+  $log = Join-Path $logRoot "$($entry.User)-$timestamp.log"
 
   if (Test-Path -LiteralPath $pref) {
     .\ExtensionCleanup.ps1 `
       -PreferencesPath $pref `
       -SecurePreferencesPath $securePref `
-      -ExtensionsPath $ext
+      -ExtensionsPath $ext `
+      -LogPath $log
   }
 }
 ```
