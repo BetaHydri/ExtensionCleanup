@@ -30,22 +30,38 @@ Dabei werden Einträge entfernt, die wie Edge-Extension-IDs aussehen
 
 Ohne Parameter nutzt das Skript:
 
-- `PreferencesPath`:  
-  `C:\Users\<User>\AppData\Local\Microsoft\Edge\User Data\Default\Preferences`
-- `SecurePreferencesPath`:  
-  `C:\Users\<User>\AppData\Local\Microsoft\Edge\User Data\Default\Secure Preferences`
-- `ExtensionsPath`:  
-  `C:\Users\<User>\AppData\Local\Microsoft\Edge\User Data\Default\Extensions`
+- `UserDataPath`:  
+  `C:\Users\<User>\AppData\Local\Microsoft\Edge\User Data`
+- Verarbeitetes Profil: `Default`  
+  (`<UserDataPath>\Default\Preferences`,
+  `<UserDataPath>\Default\Secure Preferences`,
+  `<UserDataPath>\Default\Extensions`)
+
+Mit `-AllProfiles` werden zusätzlich `Profile 1`, `Profile 2`, … erkannt;
+`System Profile`, `Guest Profile` und bekannte Cache-Ordner werden dabei
+automatisch übersprungen.
 
 ## Parameter
 
-- `-PreferencesPath <string>`  
-  Pfad zur Datei `Preferences`.
-- `-SecurePreferencesPath <string>`  
-  Pfad zur Datei `Secure Preferences`.
-- `-ExtensionsPath <string>`  
-  Pfad zum Extensions-Ordner (wird für den Vergleich im Standardmodus
-  genutzt).
+- `-UserDataPath <string>`  
+  Wurzel aller Edge-Profile.  
+  Standard: `%LOCALAPPDATA%\Microsoft\Edge\User Data`.
+- `-ProfileName <string[]>`  
+  Ein oder mehrere Profilordnernamen unterhalb von `-UserDataPath`
+  (z. B. `'Default'`, `'Profile 1'`, `'Profile 2'`).  
+  Standard: `'Default'`.
+- `-AllProfiles`  
+  Verarbeitet automatisch alle erkannten Profile unter `-UserDataPath`,
+  die eine `Preferences`-Datei enthalten. `System Profile`,
+  `Guest Profile` und bekannte Cache-Ordner werden ausgeschlossen.
+- `-PreferencesPath <string>` *(Legacy / einzelnes Profil)*  
+  Expliziter Pfad zur Datei `Preferences`. Wenn gesetzt, wird die
+  Profil-Auto-Erkennung deaktiviert und nur dieses eine Ziel verarbeitet.
+- `-SecurePreferencesPath <string>` *(Legacy / einzelnes Profil)*  
+  Expliziter Pfad zur Datei `Secure Preferences`.
+- `-ExtensionsPath <string>` *(Legacy / einzelnes Profil)*  
+  Expliziter Pfad zum `Extensions`-Ordner (Vergleichsbasis im
+  Standardmodus).
 - `-RemoveAllExtensionReferences`  
   Schaltet auf Vollmodus um.
 - `-LogPath <string>`  
@@ -53,25 +69,56 @@ Ohne Parameter nutzt das Skript:
   `%TEMP%\EdgeExtensionCleanup_<yyyyMMdd-HHmmss>.log`.
   Die Datei wird bei jedem Lauf neu erstellt (kein Append).
 
+Die drei Legacy-Parameter (`-PreferencesPath`, `-SecurePreferencesPath`,
+`-ExtensionsPath`) haben Vorrang: sobald einer davon explizit gesetzt
+ist, ignoriert das Skript `-UserDataPath` / `-ProfileName` /
+`-AllProfiles` und arbeitet ausschließlich auf den angegebenen Pfaden.
+
 ## Beispiele
 
 ### 1) Standardlauf (empfohlen)
 
-Entfernt nur verwaiste Verweise in `Preferences` und `Secure Preferences`:
+Entfernt nur verwaiste Verweise im Profil `Default`:
 
 ```powershell
 .\ExtensionCleanup.ps1
 ```
 
-### 2) Vollbereinigung
+### 2) Vollbereinigung im Profil `Default`
 
-Entfernt alle Extension-ID-Verweise in beiden Dateien:
+Entfernt alle Extension-ID-Verweise in `Preferences` und
+`Secure Preferences`:
 
 ```powershell
 .\ExtensionCleanup.ps1 -RemoveAllExtensionReferences
 ```
 
-### 3) Benutzerdefinierte Profilpfade
+### 3) Alle Edge-Profile in einem Lauf bereinigen
+
+Verarbeitet automatisch `Default`, `Profile 1`, `Profile 2`, …:
+
+```powershell
+.\ExtensionCleanup.ps1 -AllProfiles
+```
+
+### 4) Mehrere benannte Profile gezielt bereinigen
+
+```powershell
+.\ExtensionCleanup.ps1 -ProfileName 'Default','Profile 1','Profile 2'
+```
+
+### 5) Eigener `User Data`-Pfad (z. B. Backup)
+
+```powershell
+.\ExtensionCleanup.ps1 `
+  -UserDataPath 'D:\EdgeBackup\User Data' `
+  -AllProfiles
+```
+
+### 6) Benutzerdefinierte Profilpfade (Legacy)
+
+Wenn ein Profil aus historischen Gründen außerhalb der Standardstruktur
+liegt, können die Pfade direkt gesetzt werden:
 
 ```powershell
 .\ExtensionCleanup.ps1 `
@@ -80,7 +127,7 @@ Entfernt alle Extension-ID-Verweise in beiden Dateien:
   -ExtensionsPath 'D:\Profiles\Edge\Default\Extensions'
 ```
 
-### 4) Lauf mit eigener Logdatei
+### 7) Lauf mit eigener Logdatei
 
 Schreibt das vollständige Lauf-Protokoll in eine eigene Datei statt in
 `%TEMP%`:
@@ -93,6 +140,7 @@ Lässt sich beliebig mit den anderen Parametern kombinieren, z. B.:
 
 ```powershell
 .\ExtensionCleanup.ps1 `
+  -AllProfiles `
   -RemoveAllExtensionReferences `
   -LogPath "D:\Logs\EdgeCleanup\$env:USERNAME-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 ```
@@ -127,46 +175,48 @@ Optional im Vollmodus:
 ### Variante B: Zentraler Aufruf für ein bestimmtes Benutzerprofil
 
 Wenn zentral (z. B. durch einen administrativen Trigger) bereinigt wird,
-können die Pfade explizit gesetzt werden:
+kann das `User Data`-Verzeichnis eines konkreten Benutzers angesprochen
+werden:
 
 ```powershell
-$userRoot = 'C:\Users\Max.Mustermann\AppData\Local\Microsoft\Edge\User Data\Default'
+$userData = 'C:\Users\Max.Mustermann\AppData\Local\Microsoft\Edge\User Data'
 
 .\ExtensionCleanup.ps1 `
-  -PreferencesPath (Join-Path $userRoot 'Preferences') `
-  -SecurePreferencesPath (Join-Path $userRoot 'Secure Preferences') `
-  -ExtensionsPath (Join-Path $userRoot 'Extensions') `
+  -UserDataPath $userData `
+  -AllProfiles `
   -LogPath "C:\ProgramData\EdgeCleanup\Max.Mustermann-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 ```
 
-### Variante C: Mehrere Profile in einer Logoff-/Cleanup-Routine
+### Variante C: Mehrere Benutzer in einer Logoff-/Cleanup-Routine
 
 Beispiel für eine zentrale Routine (z. B. täglicher Task), die mehrere
-lokale Benutzerprofile verarbeitet und pro Profil eine eigene Logdatei
-schreibt:
+lokale Benutzerprofile verarbeitet und pro Benutzer eine eigene Logdatei
+schreibt. Innerhalb eines Benutzers werden alle Edge-Profile
+(`Default`, `Profile 1`, …) automatisch über `-AllProfiles` abgedeckt:
 
 ```powershell
 $logRoot = 'C:\ProgramData\EdgeCleanup\Logs'
 New-Item -Path $logRoot -ItemType Directory -Force | Out-Null
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
-$roots = Get-ChildItem 'C:\Users' -Directory |
+$users = Get-ChildItem 'C:\Users' -Directory |
   Where-Object { $_.Name -notin @('Public', 'Default', 'Default User', 'All Users') } |
-  ForEach-Object { [pscustomobject]@{ User = $_.Name; Path = Join-Path $_.FullName 'AppData\Local\Microsoft\Edge\User Data\Default' } }
+  ForEach-Object {
+    [pscustomobject]@{
+      User         = $_.Name
+      UserDataPath = Join-Path $_.FullName 'AppData\Local\Microsoft\Edge\User Data'
+    }
+  }
 
-foreach ($entry in $roots) {
-  $pref = Join-Path $entry.Path 'Preferences'
-  $securePref = Join-Path $entry.Path 'Secure Preferences'
-  $ext = Join-Path $entry.Path 'Extensions'
+foreach ($entry in $users) {
+  if (-not (Test-Path -LiteralPath $entry.UserDataPath)) { continue }
+
   $log = Join-Path $logRoot "$($entry.User)-$timestamp.log"
 
-  if (Test-Path -LiteralPath $pref) {
-    .\ExtensionCleanup.ps1 `
-      -PreferencesPath $pref `
-      -SecurePreferencesPath $securePref `
-      -ExtensionsPath $ext `
-      -LogPath $log
-  }
+  .\ExtensionCleanup.ps1 `
+    -UserDataPath $entry.UserDataPath `
+    -AllProfiles `
+    -LogPath $log
 }
 ```
 
@@ -263,8 +313,11 @@ Symptom: Warnung `Datei nicht gefunden, übersprungen`.
 
 Lösung:
 
-- Pfade prüfen (`-PreferencesPath`, `-SecurePreferencesPath`)
+- Pfade prüfen (`-UserDataPath`, `-ProfileName` bzw. `-PreferencesPath` /
+  `-SecurePreferencesPath`)
 - Sicherstellen, dass das Profil existiert
+- Bei `-AllProfiles`: prüfen, ob unter `-UserDataPath` überhaupt Profile
+  mit `Preferences`-Datei vorhanden sind
 
 ### Unerwartetes Ergebnis
 

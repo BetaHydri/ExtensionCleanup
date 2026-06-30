@@ -1,0 +1,7 @@
+# Local Pester run logs (Start-Process detached output)
+output/
+
+# Editor / OS
+.vscode/
+Thumbs.db
+.DS_Store

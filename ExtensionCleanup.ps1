@@ -3,17 +3,45 @@
   Entfernt verwaiste Edge-Extension-Referenzen aus Preferences, ohne andere Einträge zu beschädigen.
 
 .DESCRIPTION
-  - Liest installierte Extensions aus "...User Data\Default\Extensions\<extensionId>"
+  - Liest installierte Extensions aus "...User Data\<Profile>\Extensions\<extensionId>"
   - Bereinigt in der Preferences-JSON nur extension-nahe Bereiche
   - Entfernt nur IDs, die wie echte Extension-IDs aussehen (32 Zeichen, a-p)
   - Erstellt immer ein Backup vor dem Schreiben
   - Schreibt JSON wieder kompakt (wie Edge üblich)
+  - Verarbeitet eines, mehrere oder alle Edge-Profile (Default, Profile 1, ...)
   - Protokolliert alle Aktionen inkl. Backup-Pfade in eine Logdatei
     (Standard: %TEMP%\EdgeExtensionCleanup_<Timestamp>.log, konfigurierbar mit -LogPath)
+
+.PARAMETER UserDataPath
+  Wurzel aller Edge-Profile.
+  Standard: %LOCALAPPDATA%\Microsoft\Edge\User Data
+
+.PARAMETER ProfileName
+  Ein oder mehrere Profil-Ordnernamen unterhalb von -UserDataPath
+  (z. B. 'Default', 'Profile 1', 'Profile 2'). Standard: 'Default'.
+
+.PARAMETER AllProfiles
+  Verarbeitet alle gefundenen Edge-Profilordner unter -UserDataPath
+  (Ordner mit einer Preferences-Datei). 'System Profile' und 'Guest Profile'
+  werden übersprungen. Überschreibt -ProfileName.
+
+.PARAMETER PreferencesPath
+  Legacy: expliziter Pfad zur Datei 'Preferences'. Wenn explizit gesetzt,
+  wird der Profil-Discovery-Pfad ignoriert und nur diese eine Datei (zusammen
+  mit -SecurePreferencesPath und -ExtensionsPath) verarbeitet.
+
+.PARAMETER SecurePreferencesPath
+  Legacy: expliziter Pfad zur Datei 'Secure Preferences'. Siehe -PreferencesPath.
+
+.PARAMETER ExtensionsPath
+  Legacy: expliziter Pfad zum Extensions-Ordner. Siehe -PreferencesPath.
 
 .PARAMETER LogPath
   Pfad zur Logdatei. Standard: %TEMP%\EdgeExtensionCleanup_<Timestamp>.log.
   Die Datei wird pro Aufruf neu erstellt (kein Anhängen an bestehende Logs).
+
+.PARAMETER RemoveAllExtensionReferences
+  Vollmodus: entfernt alle Extension-ID-Referenzen, nicht nur verwaiste.
 
 .NOTES
   Vorher Edge für den jeweiligen User schließen.
@@ -22,13 +50,22 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [string]$PreferencesPath = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Preferences",
+    [string]$UserDataPath = "$env:LOCALAPPDATA\Microsoft\Edge\User Data",
 
     [Parameter(Mandatory = $false)]
-    [string]$ExtensionsPath = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Extensions",
+    [string[]]$ProfileName = @('Default'),
 
     [Parameter(Mandatory = $false)]
-    [string]$SecurePreferencesPath = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Secure Preferences",
+    [switch]$AllProfiles,
+
+    [Parameter(Mandatory = $false)]
+    [string]$PreferencesPath,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ExtensionsPath,
+
+    [Parameter(Mandatory = $false)]
+    [string]$SecurePreferencesPath,
 
     [Parameter(Mandatory = $false)]
     [string]$LogPath = "$env:TEMP\EdgeExtensionCleanup_$(Get-Date -Format 'yyyyMMdd-HHmmss').log",
@@ -167,7 +204,64 @@ function Invoke-CleanupNode {
     return $Node
 }
 
-$installed = Get-InstalledExtensionIds -Path $ExtensionsPath
+$installed = $null
+
+function Get-EdgeProfileFolder {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$UserDataPath,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$All,
+
+        [Parameter(Mandatory = $false)]
+        [string[]]$Name
+    )
+
+    if (-not (Test-Path -LiteralPath $UserDataPath)) {
+        return @()
+    }
+
+    $excluded = @('System Profile', 'Guest Profile', 'Crashpad', 'ShaderCache', 'GrShaderCache', 'GraphiteDawnCache')
+
+    if ($All) {
+        $candidates = @(Get-ChildItem -LiteralPath $UserDataPath -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $excluded -notcontains $_.Name })
+    }
+    else {
+        $candidates = @(foreach ($n in $Name) {
+                $p = Join-Path $UserDataPath $n
+                if (Test-Path -LiteralPath $p -PathType Container) {
+                    Get-Item -LiteralPath $p
+                }
+                else {
+                    Write-Log "Profilordner nicht gefunden, übersprungen: $p" -Level 'WARN'
+                }
+            })
+    }
+
+    $result = foreach ($folder in $candidates) {
+        $pref = Join-Path $folder.FullName 'Preferences'
+        if (Test-Path -LiteralPath $pref) {
+            [pscustomobject]@{
+                Name                  = $folder.Name
+                Path                  = $folder.FullName
+                PreferencesPath       = $pref
+                SecurePreferencesPath = Join-Path $folder.FullName 'Secure Preferences'
+                ExtensionsPath        = Join-Path $folder.FullName 'Extensions'
+            }
+        }
+        elseif ($All) {
+            # Beim Massenlauf: stille Filterung (kein WARN), das ist ein Cache-/Hilfsordner.
+        }
+        else {
+            Write-Log "Profilordner ohne Preferences, übersprungen: $($folder.FullName)" -Level 'WARN'
+        }
+    }
+
+    return , @($result)
+}
 
 function ConvertTo-HashtableDeep {
     [CmdletBinding()]
@@ -255,12 +349,50 @@ Write-Log "Benutzer   : $env:USERNAME"
 Write-Log "Computer   : $env:COMPUTERNAME"
 Write-Log "PowerShell : $($PSVersionTable.PSVersion)"
 Write-Log "Protokoll  : $($script:LogPath)"
-Write-Log ''
-Write-Log "Installierte Extension-IDs : $($installed.Count)"
-Write-Log "Modus                      : $(if ($RemoveAllExtensionReferences) { 'Alle Extension-Verweise' } else { 'Nur verwaiste Extension-Verweise' })"
+Write-Log "Modus      : $(if ($RemoveAllExtensionReferences) { 'Alle Extension-Verweise' } else { 'Nur verwaiste Extension-Verweise' })"
 Write-Log ''
 
-Invoke-CleanupFile -Path $PreferencesPath -InstalledIds $installed -RemoveAll ([bool]$RemoveAllExtensionReferences)
-Invoke-CleanupFile -Path $SecurePreferencesPath -InstalledIds $installed -RemoveAll ([bool]$RemoveAllExtensionReferences)
+$useLegacyPaths = $PSBoundParameters.ContainsKey('PreferencesPath') -or
+$PSBoundParameters.ContainsKey('SecurePreferencesPath') -or
+$PSBoundParameters.ContainsKey('ExtensionsPath')
+
+if ($useLegacyPaths) {
+    # Backwards-compat: explizite Einzelpfade verarbeiten (genau ein "Profil").
+    $effPref = if ($PreferencesPath) { $PreferencesPath } else { "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Preferences" }
+    $effSec = if ($SecurePreferencesPath) { $SecurePreferencesPath } else { "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Secure Preferences" }
+    $effExt = if ($ExtensionsPath) { $ExtensionsPath } else { "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Extensions" }
+
+    $profiles = @([pscustomobject]@{
+            Name                  = 'Custom'
+            Path                  = Split-Path -Path $effPref -Parent
+            PreferencesPath       = $effPref
+            SecurePreferencesPath = $effSec
+            ExtensionsPath        = $effExt
+        })
+}
+else {
+    $profiles = Get-EdgeProfileFolder -UserDataPath $UserDataPath -All:$AllProfiles -Name $ProfileName
+}
+
+if (-not $profiles -or $profiles.Count -eq 0) {
+    Write-Log "Keine Edge-Profile zum Verarbeiten gefunden unter: $UserDataPath" -Level 'WARN'
+    Write-Log '=== Bereinigung abgeschlossen ==='
+    return
+}
+
+Write-Log ("Zu verarbeitende Profile  : {0} ({1})" -f $profiles.Count, (($profiles | ForEach-Object Name) -join ', '))
 Write-Log ''
+
+foreach ($prof in $profiles) {
+    Write-Log ("=== Profil: {0} ===" -f $prof.Name)
+    Write-Log "Pfad            : $($prof.Path)"
+
+    $installed = Get-InstalledExtensionIds -Path $prof.ExtensionsPath
+    Write-Log "Installierte Extension-IDs : $($installed.Count)"
+    Write-Log ''
+
+    Invoke-CleanupFile -Path $prof.PreferencesPath -InstalledIds $installed -RemoveAll ([bool]$RemoveAllExtensionReferences)
+    Invoke-CleanupFile -Path $prof.SecurePreferencesPath -InstalledIds $installed -RemoveAll ([bool]$RemoveAllExtensionReferences)
+}
+
 Write-Log '=== Bereinigung abgeschlossen ==='

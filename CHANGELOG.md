@@ -7,7 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.2.0] - 2026-06-30
+## [1.3.0] - 2026-06-30
+
+### Added
+
+- Multi-profile support. The script now processes one, several, or all
+  Edge profiles in a single run:
+  - `-UserDataPath <string>` — root of all Edge profiles
+    (default: `%LOCALAPPDATA%\Microsoft\Edge\User Data`).
+  - `-ProfileName <string[]>` — one or more profile folder names
+    (e.g. `'Default','Profile 1','Profile 2'`). Default: `'Default'`.
+  - `-AllProfiles` — auto-discover every profile folder under
+    `-UserDataPath` that contains a `Preferences` file. `System Profile`
+    and `Guest Profile` (and known cache folders such as `ShaderCache`)
+    are excluded.
+- Per-profile section header in the run log
+  (`=== Profil: <Name> ===`) plus a summary line listing the profiles
+  that will be processed.
+- Pester 5 test suite under `Tests\ExtensionCleanup.Tests.ps1` covering
+  single profile, multiple named profiles, `-AllProfiles` discovery
+  (with System/Guest exclusion), legacy explicit paths, zero installed
+  extensions, and a non-existent profile name.
+
+### Changed
+
+- The legacy parameters `-PreferencesPath`, `-SecurePreferencesPath`, and
+  `-ExtensionsPath` are now optional and only take precedence when
+  explicitly bound. If any of them is set, the script switches to
+  single-target legacy mode and skips profile discovery; otherwise the
+  new `-UserDataPath` / `-ProfileName` / `-AllProfiles` path is used.
+
+### Verified
+
+- Pester suite (18 tests) green on Windows PowerShell 5.1 and PowerShell
+  7.6: single profile, multiple named profiles, `-AllProfiles` with
+  `System Profile` and `Guest Profile` present (correctly skipped),
+  legacy explicit-path mode, zero-installed and non-existent-profile
+  edge cases.
 
 ### Added
 
@@ -72,7 +108,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Writes output JSON compact and UTF-8 without BOM, matching Edge's own format.
 - Usage examples for terminal-server / Ivanti logoff scenarios added to README.
 
-[Unreleased]: https://github.com/BetaHydri/ExtensionCleanup/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/BetaHydri/ExtensionCleanup/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/BetaHydri/ExtensionCleanup/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/BetaHydri/ExtensionCleanup/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/BetaHydri/ExtensionCleanup/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/BetaHydri/ExtensionCleanup/releases/tag/v1.0.0
