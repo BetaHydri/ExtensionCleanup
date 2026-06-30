@@ -76,6 +76,78 @@ Entfernt alle Extension-ID-Verweise in beiden Dateien:
   -ExtensionsPath 'D:\Profiles\Edge\Default\Extensions'
 ```
 
+## Einsatz auf Terminalservern beim Abmelden
+
+Auf RDS-/Terminalservern kann das Skript beim Benutzer-Logoff ausgeführt
+werden, um Profilreste regelmäßig zu bereinigen.
+
+### Variante A: Logoff-Skript pro Benutzerkontext
+
+Wenn das Skript im Benutzerkontext läuft, reichen die Standardpfade aus,
+weil `$env:LOCALAPPDATA` automatisch auf das aktuelle Benutzerprofil zeigt.
+
+```powershell
+& 'C:\Program Files\PowerShell\7\pwsh.exe' `
+  -NoProfile -ExecutionPolicy Bypass -File `
+  'C:\Scripts\ExtensionCleanup\ExtensionCleanup.ps1'
+```
+
+Optional im Vollmodus:
+
+```powershell
+& 'C:\Program Files\PowerShell\7\pwsh.exe' `
+  -NoProfile -ExecutionPolicy Bypass -File `
+  'C:\Scripts\ExtensionCleanup\ExtensionCleanup.ps1' `
+  -RemoveAllExtensionReferences
+```
+
+### Variante B: Zentraler Aufruf für ein bestimmtes Benutzerprofil
+
+Wenn zentral (z. B. durch einen administrativen Trigger) bereinigt wird,
+können die Pfade explizit gesetzt werden:
+
+```powershell
+$userRoot = 'C:\Users\Max.Mustermann\AppData\Local\Microsoft\Edge\User Data\Default'
+
+.\ExtensionCleanup.ps1 `
+  -PreferencesPath (Join-Path $userRoot 'Preferences') `
+  -SecurePreferencesPath (Join-Path $userRoot 'Secure Preferences') `
+  -ExtensionsPath (Join-Path $userRoot 'Extensions')
+```
+
+### Variante C: Mehrere Profile in einer Logoff-/Cleanup-Routine
+
+Beispiel für eine zentrale Routine (z. B. täglicher Task), die mehrere
+lokale Benutzerprofile verarbeitet:
+
+```powershell
+$roots = Get-ChildItem 'C:\Users' -Directory |
+  Where-Object { $_.Name -notin @('Public', 'Default', 'Default User', 'All Users') } |
+  ForEach-Object { Join-Path $_.FullName 'AppData\Local\Microsoft\Edge\User Data\Default' }
+
+foreach ($root in $roots) {
+  $pref = Join-Path $root 'Preferences'
+  $securePref = Join-Path $root 'Secure Preferences'
+  $ext = Join-Path $root 'Extensions'
+
+  if (Test-Path -LiteralPath $pref) {
+    .\ExtensionCleanup.ps1 `
+      -PreferencesPath $pref `
+      -SecurePreferencesPath $securePref `
+      -ExtensionsPath $ext
+  }
+}
+```
+
+### Hinweis für GPO/Scheduled Task
+
+- GPO Logoff-Skript: Benutzerkonfiguration -> Windows-Einstellungen ->
+  Skripts (Anmelden/Abmelden) -> Abmelden
+- Scheduled Task: Trigger auf Logoff-Event oder zeitgesteuert außerhalb der
+  Hauptnutzungszeiten
+- Wichtig: Edge-Prozess des betreffenden Benutzers sollte beendet sein,
+  damit die JSON-Dateien nicht gesperrt sind
+
 ## Backup und Wiederherstellung
 
 Vor dem Schreiben erzeugt das Skript pro Datei ein Backup:
