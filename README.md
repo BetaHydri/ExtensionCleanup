@@ -69,10 +69,28 @@ automatisch übersprungen.
   `%TEMP%\EdgeExtensionCleanup_<yyyyMMdd-HHmmss>.log`.
   Die Datei wird bei jedem Lauf neu erstellt (kein Append).
 
-Die drei Legacy-Parameter (`-PreferencesPath`, `-SecurePreferencesPath`,
-`-ExtensionsPath`) haben Vorrang: sobald einer davon explizit gesetzt
-ist, ignoriert das Skript `-UserDataPath` / `-ProfileName` /
-`-AllProfiles` und arbeitet ausschließlich auf den angegebenen Pfaden.
+## Parametersätze
+
+Die Parameter sind in drei sich gegenseitig ausschließende
+Parametersätze (ParameterSets) gruppiert. Pro Aufruf darf nur **einer**
+davon verwendet werden; das Mischen erzwingt PowerShell hostseitig mit
+der Fehlermeldung `AmbiguousParameterSet`.
+
+| ParameterSet | Pflichtparameter           | Optional zusätzlich nutzbar                            |
+| ------------ | -------------------------- | ------------------------------------------------------ |
+| `ByProfile`  | *(keiner; Standardset)*    | `-UserDataPath`, `-ProfileName`                        |
+| `AllProfiles`| `-AllProfiles`             | `-UserDataPath`                                        |
+| `Legacy`     | `-PreferencesPath`         | `-SecurePreferencesPath`, `-ExtensionsPath`            |
+
+In jedem ParameterSet sind zusätzlich `-RemoveAllExtensionReferences`
+und `-LogPath` zulässig.
+
+Der aktive ParameterSet wird im Lauf-Log in einer eigenen Zeile
+festgehalten, z. B.:
+
+```text
+ParamSet   : AllProfiles
+```
 
 ## Beispiele
 
@@ -143,6 +161,22 @@ Lässt sich beliebig mit den anderen Parametern kombinieren, z. B.:
   -AllProfiles `
   -RemoveAllExtensionReferences `
   -LogPath "D:\Logs\EdgeCleanup\$env:USERNAME-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+```
+
+### 8) Ungültige Parameterkombinationen
+
+Folgende Aufrufe schlägt PowerShell direkt mit `AmbiguousParameterSet`
+ab, weil sie Parameter aus verschiedenen ParameterSets mischen:
+
+```powershell
+# Mischt 'ByProfile' (-ProfileName) und 'Legacy' (-PreferencesPath)
+.\ExtensionCleanup.ps1 -ProfileName 'Default' -PreferencesPath 'C:\X\Preferences'
+
+# Mischt 'AllProfiles' und 'Legacy'
+.\ExtensionCleanup.ps1 -AllProfiles -PreferencesPath 'C:\X\Preferences'
+
+# Mischt 'ByProfile' (-ProfileName) und 'AllProfiles' (-AllProfiles)
+.\ExtensionCleanup.ps1 -ProfileName 'Default' -AllProfiles
 ```
 
 ## Einsatz auf Terminalservern beim Abmelden

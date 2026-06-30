@@ -47,30 +47,31 @@
   Vorher Edge für den jeweiligen User schließen.
 #>
 
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'ByProfile')]
 param(
-    [Parameter(Mandatory = $false)]
+    [Parameter(ParameterSetName = 'ByProfile')]
+    [Parameter(ParameterSetName = 'AllProfiles')]
     [string]$UserDataPath = "$env:LOCALAPPDATA\Microsoft\Edge\User Data",
 
-    [Parameter(Mandatory = $false)]
+    [Parameter(ParameterSetName = 'ByProfile')]
     [string[]]$ProfileName = @('Default'),
 
-    [Parameter(Mandatory = $false)]
+    [Parameter(Mandatory = $true, ParameterSetName = 'AllProfiles')]
     [switch]$AllProfiles,
 
-    [Parameter(Mandatory = $false)]
+    [Parameter(Mandatory = $true, ParameterSetName = 'Legacy')]
     [string]$PreferencesPath,
 
-    [Parameter(Mandatory = $false)]
-    [string]$ExtensionsPath,
-
-    [Parameter(Mandatory = $false)]
+    [Parameter(ParameterSetName = 'Legacy')]
     [string]$SecurePreferencesPath,
 
-    [Parameter(Mandatory = $false)]
+    [Parameter(ParameterSetName = 'Legacy')]
+    [string]$ExtensionsPath,
+
+    [Parameter()]
     [string]$LogPath = "$env:TEMP\EdgeExtensionCleanup_$(Get-Date -Format 'yyyyMMdd-HHmmss').log",
 
-    [Parameter(Mandatory = $false)]
+    [Parameter()]
     [switch]$RemoveAllExtensionReferences
 )
 
@@ -350,13 +351,10 @@ Write-Log "Computer   : $env:COMPUTERNAME"
 Write-Log "PowerShell : $($PSVersionTable.PSVersion)"
 Write-Log "Protokoll  : $($script:LogPath)"
 Write-Log "Modus      : $(if ($RemoveAllExtensionReferences) { 'Alle Extension-Verweise' } else { 'Nur verwaiste Extension-Verweise' })"
+Write-Log "ParamSet   : $($PSCmdlet.ParameterSetName)"
 Write-Log ''
 
-$useLegacyPaths = $PSBoundParameters.ContainsKey('PreferencesPath') -or
-$PSBoundParameters.ContainsKey('SecurePreferencesPath') -or
-$PSBoundParameters.ContainsKey('ExtensionsPath')
-
-if ($useLegacyPaths) {
+if ($PSCmdlet.ParameterSetName -eq 'Legacy') {
     # Backwards-compat: explizite Einzelpfade verarbeiten (genau ein "Profil").
     $effPref = if ($PreferencesPath) { $PreferencesPath } else { "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Preferences" }
     $effSec = if ($SecurePreferencesPath) { $SecurePreferencesPath } else { "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Secure Preferences" }

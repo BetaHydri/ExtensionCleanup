@@ -264,4 +264,49 @@ Describe 'ExtensionCleanup.ps1' {
             (Get-Content -LiteralPath $script:LogFile6 -Raw) | Should -Match 'Profilordner nicht gefunden'
         }
     }
+
+    Context 'Parameter sets' {
+        BeforeAll {
+            $script:UserData7 = Join-Path $TestDrive 'ParamSets'
+            $script:Def7 = New-MockProfile -Root $script:UserData7 -ProfileFolder 'Default' -IncludeOrphans
+            $null = New-MockProfile -Root $script:UserData7 -ProfileFolder 'Profile 1' -IncludeOrphans
+            $script:LogByProfile = Join-Path $TestDrive 'paramset-byprofile.log'
+            $script:LogAllProfiles = Join-Path $TestDrive 'paramset-allprofiles.log'
+            $script:LogLegacy = Join-Path $TestDrive 'paramset-legacy.log'
+
+            & $script:ScriptPath -UserDataPath $script:UserData7 -ProfileName 'Default' -LogPath $script:LogByProfile
+            & $script:ScriptPath -UserDataPath $script:UserData7 -AllProfiles -LogPath $script:LogAllProfiles
+            & $script:ScriptPath -PreferencesPath (Join-Path $script:Def7 'Preferences') `
+                -SecurePreferencesPath (Join-Path $script:Def7 'Secure Preferences') `
+                -ExtensionsPath (Join-Path $script:Def7 'Extensions') `
+                -LogPath $script:LogLegacy
+        }
+
+        It 'logs ParamSet ByProfile when -ProfileName is used' {
+            (Get-Content -LiteralPath $script:LogByProfile -Raw) | Should -Match 'ParamSet\s*:\s*ByProfile'
+        }
+
+        It 'logs ParamSet AllProfiles when -AllProfiles is used' {
+            (Get-Content -LiteralPath $script:LogAllProfiles -Raw) | Should -Match 'ParamSet\s*:\s*AllProfiles'
+        }
+
+        It 'logs ParamSet Legacy when -PreferencesPath is used' {
+            (Get-Content -LiteralPath $script:LogLegacy -Raw) | Should -Match 'ParamSet\s*:\s*Legacy'
+        }
+
+        It 'rejects -ProfileName combined with -PreferencesPath' {
+            { & $script:ScriptPath -ProfileName 'Default' -PreferencesPath 'C:\nope\Preferences' -LogPath (Join-Path $TestDrive 'reject1.log') } |
+            Should -Throw -ErrorId 'AmbiguousParameterSet,ExtensionCleanup.ps1'
+        }
+
+        It 'rejects -AllProfiles combined with -PreferencesPath' {
+            { & $script:ScriptPath -AllProfiles -PreferencesPath 'C:\nope\Preferences' -LogPath (Join-Path $TestDrive 'reject2.log') } |
+            Should -Throw -ErrorId 'AmbiguousParameterSet,ExtensionCleanup.ps1'
+        }
+
+        It 'rejects -ProfileName combined with -AllProfiles' {
+            { & $script:ScriptPath -ProfileName 'Default' -AllProfiles -LogPath (Join-Path $TestDrive 'reject3.log') } |
+            Should -Throw -ErrorId 'AmbiguousParameterSet,ExtensionCleanup.ps1'
+        }
+    }
 }

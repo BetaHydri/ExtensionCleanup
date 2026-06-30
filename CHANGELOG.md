@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Enforce mutually exclusive parameter sets `ByProfile` (default),
+  `AllProfiles`, and `Legacy`. Combining parameters from different sets
+  (e.g. `-ProfileName` with `-PreferencesPath`, `-AllProfiles` with
+  `-PreferencesPath`, or `-ProfileName` with `-AllProfiles`) now fails
+  fast with PowerShell's native `AmbiguousParameterSet` error instead
+  of being silently resolved by runtime precedence on
+  `$PSBoundParameters`.
+- `-AllProfiles` and `-PreferencesPath` are declared `Mandatory` inside
+  their respective sets, so PowerShell selects the correct set
+  unambiguously without runtime sniffing.
+
+### Added
+
+- New `ParamSet : <ByProfile|AllProfiles|Legacy>` line in the run-log
+  header for traceability.
+- Six additional Pester tests under
+  `Tests\ExtensionCleanup.Tests.ps1` (`Context 'Parameter sets'`):
+  three happy-path tests confirming the correct set is logged for each
+  invocation style, plus three rejection tests that assert
+  `AmbiguousParameterSet,ExtensionCleanup.ps1` is thrown when
+  parameters from different sets are combined.
+
+### Verified
+
+- Full Pester suite (24 tests) green on Windows PowerShell 5.1 and
+  PowerShell 7.6.
+
 ## [1.3.0] - 2026-06-30
 
 ### Added
