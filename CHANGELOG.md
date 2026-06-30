@@ -7,8 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New `-Force` switch (available in every parameter set). Bypasses the
+  pre-flight "Edge running in this session" gate and stops every
+  `msedge.exe` process in the current user session before cleanup.
+- Pre-flight gate: before any profile is touched, the script checks
+  whether `msedge.exe` runs in the **current** user session
+  (`Get-Process msedge` filtered by `SessionId == $PID.SessionId`). If
+  yes and `-Force` is not set, the script logs a `WARN`, prints a hint
+  and exits cleanly with code `0` instead of crashing on locked JSON
+  files. The gate is skipped in the `Legacy` parameter set so explicit
+  paths to offline-backed-up profiles still work.
+- New internal helpers `Test-EdgeRunningInCurrentSession` and
+  `Stop-EdgeInCurrentSession`. The detection helper honors a test hook
+  via `$env:EDGECLEANUP_TEST_EDGE_RUNNING` (`'1'` = simulate running,
+  `'0'` = simulate not running, unset = real detection) so the Pester
+  suite can validate both branches deterministically on developer
+  machines that have Edge open.
+- New `Force : <True|False>` line in the run-log header for
+  traceability.
+- Seven additional Pester tests under
+  `Tests\ExtensionCleanup.Tests.ps1`:
+  - `Context 'Pre-flight: Edge running in current session'` (3 tests):
+    blocked run logs the WARN + still reaches the closing footer +
+    leaves the orphan in place; `-Force` run kills msedge and removes
+    the orphan; `Force : True` appears in the run-log header.
+  - `Context 'Per-file lock resilience (Preferences locked, Secure
+    Preferences free)'` (4 tests): a hard OS-level exclusive lock on
+    `Preferences` (`[System.IO.File]::Open(..., 'Open', 'Read', 'None')`)
+    produces a per-file `WARN`, the run still finishes with the footer,
+    a skip-summary line is logged, and the unlocked
+    `Secure Preferences` is cleaned in the same run.
+- New `ParamSet : <ByProfile|AllProfiles|Legacy>` line in the run-log
+  header for traceability (carried over from the parameter-set
+  refactor).
+- Six earlier Pester tests under
+  `Tests\ExtensionCleanup.Tests.ps1` (`Context 'Parameter sets'`):
+  three happy-path tests confirming the correct set is logged for each
+  invocation style, plus three rejection tests that assert
+  `AmbiguousParameterSet,ExtensionCleanup.ps1` is thrown when
+  parameters from different sets are combined.
+
 ### Changed
 
+- `Invoke-CleanupFile` now returns `[bool]` (`$true` on successful
+  rewrite, `$false` on skip / lock / missing file). The main loop
+  counts the `$false` returns and emits a single summary line
+  (`Hinweis: N Datei(en) wurden ausgelassen ...`) at the end.
+- `Invoke-CleanupFile` wraps its read / backup / write steps in a
+  `try / catch [System.IO.IOException]` plus
+  `catch [System.UnauthorizedAccessException]`. A lock on one file no
+  longer aborts the whole run; the other files in the same profile and
+  all remaining profiles are still processed.
 - Enforce mutually exclusive parameter sets `ByProfile` (default),
   `AllProfiles`, and `Legacy`. Combining parameters from different sets
   (e.g. `-ProfileName` with `-PreferencesPath`, `-AllProfiles` with
@@ -19,21 +70,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `-AllProfiles` and `-PreferencesPath` are declared `Mandatory` inside
   their respective sets, so PowerShell selects the correct set
   unambiguously without runtime sniffing.
+- `ExtensionCleanup.ps1` is now saved as **UTF-8 with BOM**. Windows
+  PowerShell 5.1 was decoding the previous BOM-less file as Windows-1252,
+  which double-encoded German umlauts (`ä`, `ö`, `ü`, `ß`) in
+  `WARN`/`INFO` log lines and broke any tooling that grep-matched on
+  those strings. PS 7 was unaffected. No semantic source change.
 
-### Added
+### Fixed
 
-- New `ParamSet : <ByProfile|AllProfiles|Legacy>` line in the run-log
-  header for traceability.
-- Six additional Pester tests under
-  `Tests\ExtensionCleanup.Tests.ps1` (`Context 'Parameter sets'`):
-  three happy-path tests confirming the correct set is logged for each
-  invocation style, plus three rejection tests that assert
-  `AmbiguousParameterSet,ExtensionCleanup.ps1` is thrown when
-  parameters from different sets are combined.
+- Ivanti error 17 / `IOException 0x80070020` ("Der Prozess kann nicht
+  auf die Datei zugreifen, da sie von einem anderen Prozess verwendet
+  wird") when Edge happens to be running during a scheduled or logoff
+  cleanup. The script now either skips cleanly with `WARN` + Exit 0
+  (default) or terminates the offending `msedge.exe` instances first
+  (`-Force`). A late-arriving per-file lock during the run is reported
+  per file and the run still completes with Exit 0.
 
 ### Verified
 
-- Full Pester suite (24 tests) green on Windows PowerShell 5.1 and
+- Full Pester suite (31 tests) green on Windows PowerShell 5.1 and
   PowerShell 7.6.
 
 ## [1.3.0] - 2026-06-30

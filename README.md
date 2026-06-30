@@ -25,6 +25,8 @@ Dabei werden Einträge entfernt, die wie Edge-Extension-IDs aussehen
 - Windows mit Microsoft Edge-Profil
 - PowerShell (Windows PowerShell oder PowerShell 7)
 - Edge sollte vor dem Lauf geschlossen sein
+  (das Skript prüft dies seit Version 1.4 automatisch — siehe
+  [Robustheit gegen laufenden Edge](#robustheit-gegen-laufenden-edge))
 
 ## Standardpfade
 
@@ -64,6 +66,15 @@ automatisch übersprungen.
   Standardmodus).
 - `-RemoveAllExtensionReferences`  
   Schaltet auf Vollmodus um.
+- `-Force`  
+  Übergeht die Pre-Flight-Prüfung „Edge läuft in der aktuellen Session".
+  Ist Edge bereits offen, beendet das Skript zuerst alle `msedge.exe`-
+  Prozesse **der aktuellen Benutzersession** (`Get-Process msedge` gefiltert
+  nach `SessionId`) und führt anschließend die Bereinigung aus. Ohne
+  `-Force` beendet sich das Skript mit Exit 0 und einer `WARN`-Meldung,
+  damit Logoff- und Maintenance-Pipelines (z. B. Ivanti) nicht mit Fehler
+  17 / `IOException 0x80070020` brechen. `-Force` ist in jedem
+  ParameterSet zulässig (siehe [Parametersätze](#parametersätze)).
 - `-LogPath <string>`  
   Pfad zur Logdatei für diesen Lauf. Standardwert:
   `%TEMP%\EdgeExtensionCleanup_<yyyyMMdd-HHmmss>.log`.
@@ -82,8 +93,8 @@ der Fehlermeldung `AmbiguousParameterSet`.
 | `AllProfiles`| `-AllProfiles`             | `-UserDataPath`                                        |
 | `Legacy`     | `-PreferencesPath`         | `-SecurePreferencesPath`, `-ExtensionsPath`            |
 
-In jedem ParameterSet sind zusätzlich `-RemoveAllExtensionReferences`
-und `-LogPath` zulässig.
+In jedem ParameterSet sind zusätzlich `-RemoveAllExtensionReferences`,
+`-Force` und `-LogPath` zulässig.
 
 Der aktive ParameterSet wird im Lauf-Log in einer eigenen Zeile
 festgehalten, z. B.:
@@ -178,6 +189,77 @@ ab, weil sie Parameter aus verschiedenen ParameterSets mischen:
 # Mischt 'ByProfile' (-ProfileName) und 'AllProfiles' (-AllProfiles)
 .\ExtensionCleanup.ps1 -ProfileName 'Default' -AllProfiles
 ```
+
+### 9) Robust gegen laufenden Edge (Pre-Flight)
+
+Ab Version 1.4 prüft das Skript vor jeder Bereinigung, ob in der
+**aktuellen Benutzersession** ein `msedge.exe`-Prozess läuft. Die
+Prüfung verwendet `Get-Process msedge` und filtert auf
+`SessionId == (Get-Process -Id $PID).SessionId`. Edge-Prozesse anderer
+Benutzer auf demselben Rechner werden bewusst ignoriert.
+
+Standardverhalten (ohne `-Force`) — bricht **sauber** ab, statt Edge
+in laufende Dateien schreiben zu lassen:
+
+```powershell
+.\ExtensionCleanup.ps1
+# [WARN] msedge.exe läuft in der aktuellen Session. Cleanup wird übersprungen (Exit 0).
+# [INFO] Hinweis: Edge schließen und Skript erneut starten, oder -Force verwenden.
+# [INFO] === Bereinigung abgeschlossen ===
+# Exit-Code: 0
+```
+
+Mit `-Force` — beendet zuerst alle `msedge.exe`-Prozesse der eigenen
+Session und bereinigt anschließend:
+
+```powershell
+.\ExtensionCleanup.ps1 -Force
+# [WARN] msedge.exe läuft, -Force gesetzt — beende msedge.exe in Session 1.
+# [WARN] Beendete msedge-Prozesse: 7
+# === Profil: Default ===
+# ...
+# [INFO] === Bereinigung abgeschlossen ===
+```
+
+Im Lauf-Log-Header taucht die `-Force`-Wahl explizit auf:
+
+```text
+Force      : True
+```
+
+Der Pre-Flight gilt **nicht** im `Legacy`-ParameterSet
+(`-PreferencesPath`), damit explizite Pfade — typischerweise auf
+offline gesicherte Profile — auch dann verarbeitet werden, wenn der
+Benutzer parallel mit einem anderen Edge-Profil arbeitet.
+
+### 10) Per-Datei-Resilienz bei gesperrten Dateien
+
+Wird eine einzelne Datei (z. B. `Secure Preferences`) während der
+Bereinigung gesperrt — etwa durch einen kurz nach dem Pre-Flight wieder
+gestarteten Edge-Hintergrundprozess oder durch ein AV-/Backup-Tool —
+überspringt das Skript diese eine Datei, **verarbeitet die anderen
+Dateien des Profils weiter** und beendet sich am Ende trotzdem mit
+Exit-Code 0:
+
+```text
+=== Profil: Default ===
+[INFO] Datei: ...\Default\Preferences
+[INFO] Entfernte Keys: 1, entfernte Stringwerte: 0
+[WARN] Datei gesperrt, übersprungen: ...\Default\Secure Preferences
+        (Der Prozess kann nicht auf die Datei zugreifen,
+         da sie von einem anderen Prozess verwendet wird.)
+[WARN] Hinweis: 1 Datei(en) wurden ausgelassen (gesperrt oder fehlend).
+       Lauf endet trotzdem mit Exit-Code 0.
+[INFO] === Bereinigung abgeschlossen ===
+```
+
+Damit bleibt das Skript für unbeaufsichtigte Maintenance-Pipelines
+(Ivanti, ConfigMgr, Scheduled Tasks, Logoff-Skripte) zuverlässig:
+
+- `IOException` / `UnauthorizedAccessException` einer Einzeldatei
+  führen nicht mehr zum harten Abbruch des Gesamtlaufs.
+- Der Lauf ist deterministisch idempotent: beim nächsten Lauf wird die
+  zuvor gesperrte Datei erneut versucht.
 
 ## Einsatz auf Terminalservern beim Abmelden
 
@@ -334,12 +416,21 @@ Session setzen.
 
 ### Edge läuft noch
 
-Symptom: Schreibfehler auf `Preferences` oder `Secure Preferences`.
+Symptom: Schreibfehler auf `Preferences` oder `Secure Preferences`,
+bzw. `IOException 0x80070020`.
 
-Lösung:
+Lösung (ab Version 1.4 automatisch abgefangen):
 
-1. Edge komplett schließen (auch Hintergrundprozesse)
-2. Skript erneut ausführen
+- Pre-Flight-Gate aktiv: Skript bricht mit `WARN` und Exit 0 ab, wenn
+  `msedge.exe` in der aktuellen Session läuft → Edge schließen und
+  erneut starten.
+- Alternativ `-Force` setzen — das Skript beendet `msedge.exe` der
+  eigenen Session und bereinigt anschließend (siehe
+  [Beispiel 9](#9-robust-gegen-laufenden-edge-pre-flight)).
+- Sperrt ein Hintergrundprozess (AV, Backup) eine **einzelne** Datei
+  während des Laufs, wird nur diese Datei übersprungen — der Lauf
+  endet trotzdem mit Exit 0 (siehe
+  [Beispiel 10](#10-per-datei-resilienz-bei-gesperrten-dateien)).
 
 ### Datei nicht gefunden
 

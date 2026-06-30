@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Entfernt verwaiste Edge-Extension-Referenzen aus Preferences, ohne andere Einträge zu beschädigen.
 
@@ -72,7 +72,10 @@ param(
     [string]$LogPath = "$env:TEMP\EdgeExtensionCleanup_$(Get-Date -Format 'yyyyMMdd-HHmmss').log",
 
     [Parameter()]
-    [switch]$RemoveAllExtensionReferences
+    [switch]$RemoveAllExtensionReferences,
+
+    [Parameter()]
+    [switch]$Force
 )
 
 Set-StrictMode -Version Latest
@@ -106,6 +109,48 @@ function Write-Log {
 function Test-EdgeExtensionId {
     param([string]$Value)
     return ($null -ne $Value -and $Value -match '^[a-p]{32}$')
+}
+
+function Test-EdgeRunningInCurrentSession {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    # Test hook: set EDGECLEANUP_TEST_EDGE_RUNNING=1/0 to bypass real process lookup.
+    if ($env:EDGECLEANUP_TEST_EDGE_RUNNING -eq '1') { return $true }
+    if ($env:EDGECLEANUP_TEST_EDGE_RUNNING -eq '0') { return $false }
+
+    try {
+        $mySession = (Get-Process -Id $PID).SessionId
+    }
+    catch {
+        return $false
+    }
+
+    $running = @(Get-Process -Name 'msedge' -ErrorAction SilentlyContinue |
+            Where-Object { $_.SessionId -eq $mySession })
+    return ($running.Count -gt 0)
+}
+
+function Stop-EdgeInCurrentSession {
+    [CmdletBinding()]
+    [OutputType([int])]
+    param()
+
+    try {
+        $mySession = (Get-Process -Id $PID).SessionId
+    }
+    catch {
+        return 0
+    }
+
+    $procs = @(Get-Process -Name 'msedge' -ErrorAction SilentlyContinue |
+            Where-Object { $_.SessionId -eq $mySession })
+    if ($procs.Count -gt 0) {
+        $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
+    }
+    return $procs.Count
 }
 
 function Get-InstalledExtensionIds {
@@ -298,6 +343,7 @@ function ConvertTo-HashtableDeep {
 }
 
 function Invoke-CleanupFile {
+    [OutputType([bool])]
     param(
         [Parameter(Mandatory = $true)]
         [string]$Path,
@@ -312,37 +358,50 @@ function Invoke-CleanupFile {
 
     if (-not (Test-Path -LiteralPath $Path)) {
         Write-Log "Datei nicht gefunden, übersprungen: $Path" -Level 'WARN'
-        return
+        return $false
     }
 
-    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $backupPath = "$Path.bak.$timestamp"
-    Copy-Item -LiteralPath $Path -Destination $backupPath -Force
+    try {
+        $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $backupPath = "$Path.bak.$timestamp"
+        Copy-Item -LiteralPath $Path -Destination $backupPath -Force
 
-    $raw = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
-    if ($PSVersionTable.PSVersion.Major -ge 6) {
-        $json = $raw | ConvertFrom-Json -AsHashtable -Depth 100
+        $raw = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
+        if ($PSVersionTable.PSVersion.Major -ge 6) {
+            $json = $raw | ConvertFrom-Json -AsHashtable -Depth 100
+        }
+        else {
+            $json = $raw | ConvertFrom-Json | ConvertTo-HashtableDeep
+        }
+
+        $removedKeys = 0
+        $removedArrayValues = 0
+
+        $json = Invoke-CleanupNode -Node $json -Path '$' -InExtensionContext $false `
+            -InstalledIds $InstalledIds -RemoveAllExtensionReferences $RemoveAll `
+            -RemovedKeys ([ref]$removedKeys) -RemovedArrayValues ([ref]$removedArrayValues)
+
+        $out = $json | ConvertTo-Json -Depth 100 -Compress
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($Path, $out, $utf8NoBom)
+
+        Write-Log "Datei   : $Path"
+        Write-Log "Backup  : $backupPath"
+        Write-Log "Entfernte Schlüssel (ID-Keys)     : $removedKeys"
+        Write-Log "Entfernte Array-Werte (ID-Strings): $removedArrayValues"
+        Write-Log ''
+        return $true
     }
-    else {
-        $json = $raw | ConvertFrom-Json | ConvertTo-HashtableDeep
+    catch [System.IO.IOException] {
+        Write-Log ("Datei gesperrt, übersprungen: {0} ({1})" -f $Path, $_.Exception.Message) -Level 'WARN'
+        Write-Log ''
+        return $false
     }
-
-    $removedKeys = 0
-    $removedArrayValues = 0
-
-    $json = Invoke-CleanupNode -Node $json -Path '$' -InExtensionContext $false `
-        -InstalledIds $InstalledIds -RemoveAllExtensionReferences $RemoveAll `
-        -RemovedKeys ([ref]$removedKeys) -RemovedArrayValues ([ref]$removedArrayValues)
-
-    $out = $json | ConvertTo-Json -Depth 100 -Compress
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($Path, $out, $utf8NoBom)
-
-    Write-Log "Datei   : $Path"
-    Write-Log "Backup  : $backupPath"
-    Write-Log "Entfernte Schlüssel (ID-Keys)     : $removedKeys"
-    Write-Log "Entfernte Array-Werte (ID-Strings): $removedArrayValues"
-    Write-Log ''
+    catch [System.UnauthorizedAccessException] {
+        Write-Log ("Keine Schreibberechtigung, übersprungen: {0} ({1})" -f $Path, $_.Exception.Message) -Level 'WARN'
+        Write-Log ''
+        return $false
+    }
 }
 
 Write-Log '=== EdgeExtensionCleanup ==='
@@ -352,7 +411,25 @@ Write-Log "PowerShell : $($PSVersionTable.PSVersion)"
 Write-Log "Protokoll  : $($script:LogPath)"
 Write-Log "Modus      : $(if ($RemoveAllExtensionReferences) { 'Alle Extension-Verweise' } else { 'Nur verwaiste Extension-Verweise' })"
 Write-Log "ParamSet   : $($PSCmdlet.ParameterSetName)"
+Write-Log "Force      : $([bool]$Force)"
 Write-Log ''
+
+if ($PSCmdlet.ParameterSetName -ne 'Legacy') {
+    if (Test-EdgeRunningInCurrentSession) {
+        if ($Force) {
+            Write-Log 'msedge.exe läuft in der aktuellen Session. -Force gesetzt -> beende Edge-Prozesse.' -Level 'WARN'
+            $stopped = Stop-EdgeInCurrentSession
+            Write-Log ("Beendete msedge-Prozesse: {0}" -f $stopped)
+            Write-Log ''
+        }
+        else {
+            Write-Log 'msedge.exe läuft in der aktuellen Session. Cleanup wird übersprungen (Exit 0).' -Level 'WARN'
+            Write-Log 'Hinweis: Edge schließen und Skript erneut starten, oder -Force verwenden.'
+            Write-Log '=== Bereinigung abgeschlossen ==='
+            exit 0
+        }
+    }
+}
 
 if ($PSCmdlet.ParameterSetName -eq 'Legacy') {
     # Backwards-compat: explizite Einzelpfade verarbeiten (genau ein "Profil").
@@ -381,6 +458,7 @@ if (-not $profiles -or $profiles.Count -eq 0) {
 Write-Log ("Zu verarbeitende Profile  : {0} ({1})" -f $profiles.Count, (($profiles | ForEach-Object Name) -join ', '))
 Write-Log ''
 
+$skipCount = 0
 foreach ($prof in $profiles) {
     Write-Log ("=== Profil: {0} ===" -f $prof.Name)
     Write-Log "Pfad            : $($prof.Path)"
@@ -389,8 +467,11 @@ foreach ($prof in $profiles) {
     Write-Log "Installierte Extension-IDs : $($installed.Count)"
     Write-Log ''
 
-    Invoke-CleanupFile -Path $prof.PreferencesPath -InstalledIds $installed -RemoveAll ([bool]$RemoveAllExtensionReferences)
-    Invoke-CleanupFile -Path $prof.SecurePreferencesPath -InstalledIds $installed -RemoveAll ([bool]$RemoveAllExtensionReferences)
+    if (-not (Invoke-CleanupFile -Path $prof.PreferencesPath       -InstalledIds $installed -RemoveAll ([bool]$RemoveAllExtensionReferences))) { $skipCount++ }
+    if (-not (Invoke-CleanupFile -Path $prof.SecurePreferencesPath -InstalledIds $installed -RemoveAll ([bool]$RemoveAllExtensionReferences))) { $skipCount++ }
 }
 
+if ($skipCount -gt 0) {
+    Write-Log ("Hinweis: {0} Datei(en) wurden ausgelassen (gesperrt oder fehlend). Lauf endet trotzdem mit Exit-Code 0." -f $skipCount) -Level 'WARN'
+}
 Write-Log '=== Bereinigung abgeschlossen ==='

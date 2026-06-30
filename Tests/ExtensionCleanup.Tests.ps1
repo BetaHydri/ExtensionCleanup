@@ -2,6 +2,11 @@
 
 Describe 'ExtensionCleanup.ps1' {
     BeforeAll {
+        # Suppress real-Edge detection for the whole suite. The dedicated
+        # pre-flight context overrides this locally to '1'.
+        $script:OriginalEdgeRunning = $env:EDGECLEANUP_TEST_EDGE_RUNNING
+        $env:EDGECLEANUP_TEST_EDGE_RUNNING = '0'
+
         $script:ScriptPath = (Resolve-Path (Join-Path (Join-Path $PSScriptRoot '..') 'ExtensionCleanup.ps1')).Path
         $script:InstalledId = 'abcdefghijklmnopabcdefghijklmnop'
         $script:OrphanId = 'ponmlkjihgfedcbaponmlkjihgfedcba'
@@ -76,6 +81,15 @@ Describe 'ExtensionCleanup.ps1' {
                 foreach ($p in $obj.PSObject.Properties) { $ht[$p.Name] = $p.Value }
                 return $ht
             }
+        }
+    }
+
+    AfterAll {
+        if ($null -eq $script:OriginalEdgeRunning) {
+            Remove-Item Env:\EDGECLEANUP_TEST_EDGE_RUNNING -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:EDGECLEANUP_TEST_EDGE_RUNNING = $script:OriginalEdgeRunning
         }
     }
 
@@ -307,6 +321,85 @@ Describe 'ExtensionCleanup.ps1' {
         It 'rejects -ProfileName combined with -AllProfiles' {
             { & $script:ScriptPath -ProfileName 'Default' -AllProfiles -LogPath (Join-Path $TestDrive 'reject3.log') } |
             Should -Throw -ErrorId 'AmbiguousParameterSet,ExtensionCleanup.ps1'
+        }
+    }
+
+    Context 'Pre-flight: Edge running in current session' {
+        BeforeAll {
+            $script:UserData8a = Join-Path $TestDrive 'EdgeRunningBlocked'
+            $script:UserData8b = Join-Path $TestDrive 'EdgeRunningForced'
+            $script:Def8a = New-MockProfile -Root $script:UserData8a -ProfileFolder 'Default' -IncludeOrphans
+            $script:Def8b = New-MockProfile -Root $script:UserData8b -ProfileFolder 'Default' -IncludeOrphans
+            $script:LogEdgeBlocked = Join-Path $TestDrive 'edge-blocked.log'
+            $script:LogEdgeForced = Join-Path $TestDrive 'edge-forced.log'
+
+            $env:EDGECLEANUP_TEST_EDGE_RUNNING = '1'
+            try {
+                & $script:ScriptPath -UserDataPath $script:UserData8a -LogPath $script:LogEdgeBlocked
+                & $script:ScriptPath -UserDataPath $script:UserData8b -Force -LogPath $script:LogEdgeForced
+            }
+            finally {
+                # Restore suite-wide neutralisation, do NOT unset.
+                $env:EDGECLEANUP_TEST_EDGE_RUNNING = '0'
+            }
+        }
+
+        It 'skips cleanup with WARN when msedge is detected and -Force is not set' {
+            $log = Get-Content -LiteralPath $script:LogEdgeBlocked -Raw
+            $log | Should -Match 'msedge\.exe l..?uft in der aktuellen Session'
+            $log | Should -Match '=== Bereinigung abgeschlossen ==='
+            $p = Get-Pref -Path (Join-Path $script:Def8a 'Preferences')
+            $names = @($p.extensions.settings.PSObject.Properties.Name) + @($p.extensions.settings.Keys)
+            $names | Should -Contain $script:OrphanId
+        }
+
+        It 'proceeds with cleanup when -Force is set even though msedge is reported running' {
+            $log = Get-Content -LiteralPath $script:LogEdgeForced -Raw
+            $log | Should -Match '-Force gesetzt'
+            $log | Should -Match 'Beendete msedge-Prozesse:'
+            $p = Get-Pref -Path (Join-Path $script:Def8b 'Preferences')
+            $names = @($p.extensions.settings.PSObject.Properties.Name) + @($p.extensions.settings.Keys)
+            $names | Should -Not -Contain $script:OrphanId
+        }
+
+        It 'records Force flag in the run-log header' {
+            (Get-Content -LiteralPath $script:LogEdgeForced -Raw) | Should -Match 'Force\s*:\s*True'
+        }
+    }
+
+    Context 'Per-file lock resilience (Preferences locked, Secure Preferences free)' {
+        BeforeAll {
+            $script:UserData9 = Join-Path $TestDrive 'LockedPrefs'
+            $script:Def9 = New-MockProfile -Root $script:UserData9 -ProfileFolder 'Default' -IncludeOrphans
+            $script:LogLocked = Join-Path $TestDrive 'locked.log'
+            $script:LockedPrefs = Join-Path $script:Def9 'Preferences'
+
+            $script:LockHandle = [System.IO.File]::Open($script:LockedPrefs, 'Open', 'Read', 'None')
+            try {
+                & $script:ScriptPath -UserDataPath $script:UserData9 -LogPath $script:LogLocked
+            }
+            finally {
+                $script:LockHandle.Dispose()
+            }
+        }
+
+        It 'logs a WARN that the locked file was skipped' {
+            (Get-Content -LiteralPath $script:LogLocked -Raw) | Should -Match 'Datei gesperrt, ..?bersprungen.*Preferences'
+        }
+
+        It 'still completes the run end-to-end' {
+            (Get-Content -LiteralPath $script:LogLocked -Raw) | Should -Match '=== Bereinigung abgeschlossen ==='
+        }
+
+        It 'emits a skip-summary line at the end of the log' {
+            (Get-Content -LiteralPath $script:LogLocked -Raw) | Should -Match 'Datei\(en\) wurden ausgelassen'
+        }
+
+        It 'still cleans Secure Preferences of the same profile' {
+            $sec = Get-Pref -Path (Join-Path $script:Def9 'Secure Preferences')
+            $settings = $sec.protection.macs.extensions.settings
+            $names = @($settings.PSObject.Properties.Name) + @($settings.Keys)
+            $names | Should -Not -Contain $script:OrphanId
         }
     }
 }
