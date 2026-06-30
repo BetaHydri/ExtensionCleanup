@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-30
+
+### Added
+
+- New `-LogPath` parameter and run-level logging via a `Write-Log` helper.
+  Every action (header with user/computer/PS version, per-file work, backup
+  paths, removed-key/value counts, warnings, footer) is written to a UTF-8
+  log file. Default path:
+  `%TEMP%\EdgeExtensionCleanup_<yyyyMMdd-HHmmss>.log`.
+  The log file is created fresh on every run (no append).
+
+### Fixed
+
+- `Get-InstalledExtensionIds` now returns the `HashSet` reliably via the
+  comma operator (`return , $set`). PowerShell previously unrolled the
+  enumerable, which silently turned the return value into a bare string
+  when exactly one extension was installed and broke the orphan check
+  under `Set-StrictMode -Version Latest`.
+- `Invoke-CleanupFile` and `Invoke-CleanupNode` accept an empty
+  `InstalledIds` HashSet (`[AllowEmptyCollection()]`). Running on a profile
+  with zero installed extensions no longer aborts with
+  `ParameterArgumentValidationErrorEmptyCollectionNotAllowed`.
+- Refined `ConvertTo-HashtableDeep` to a proper advanced function with
+  `[CmdletBinding()]`, `ValueFromPipeline`, and a `process` block, so the
+  PS 5.1 pipeline call (`... | ConvertFrom-Json | ConvertTo-HashtableDeep`)
+  binds cleanly instead of failing with `InputObjectNotBound`.
+
+### Verified
+
+- End-to-end runtime test matrix passes on Windows PowerShell 5.1 and
+  PowerShell 7.6 for 0, 1, and multiple installed extensions: orphan
+  removed, installed kept, unrelated JSON sections preserved.
+
 ## [1.1.0] - 2026-06-30
 
 ### Fixed
@@ -39,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Writes output JSON compact and UTF-8 without BOM, matching Edge's own format.
 - Usage examples for terminal-server / Ivanti logoff scenarios added to README.
 
-[Unreleased]: https://github.com/BetaHydri/ExtensionCleanup/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/BetaHydri/ExtensionCleanup/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/BetaHydri/ExtensionCleanup/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/BetaHydri/ExtensionCleanup/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/BetaHydri/ExtensionCleanup/releases/tag/v1.0.0

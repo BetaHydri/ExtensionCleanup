@@ -48,6 +48,10 @@ Ohne Parameter nutzt das Skript:
   genutzt).
 - `-RemoveAllExtensionReferences`  
   Schaltet auf Vollmodus um.
+- `-LogPath <string>`  
+  Pfad zur Logdatei für diesen Lauf. Standardwert:
+  `%TEMP%\EdgeExtensionCleanup_<yyyyMMdd-HHmmss>.log`.
+  Die Datei wird bei jedem Lauf neu erstellt (kein Append).
 
 ## Beispiele
 
@@ -179,6 +183,34 @@ Das Skript zeigt unter anderem:
 - Backup-Pfad pro Datei
 - Anzahl entfernter ID-Keys
 - Anzahl entfernter ID-Stringwerte
+
+## Logging
+
+Zusätzlich zur Konsolenausgabe schreibt das Skript einen vollständigen
+Lauf-Bericht in eine UTF-8-Logdatei (ohne BOM). Standardpfad:
+
+```text
+%TEMP%\EdgeExtensionCleanup_<yyyyMMdd-HHmmss>.log
+```
+
+Der Pfad kann über `-LogPath` überschrieben werden:
+
+```powershell
+.\ExtensionCleanup.ps1 -LogPath 'D:\Logs\EdgeCleanup\Cleanup.log'
+```
+
+Die Logdatei enthält:
+
+- Header mit Benutzer, Computer, PowerShell-Version, Logpfad
+- Anzahl installierter Extensions und gewählter Modus
+- pro verarbeiteter Datei: Pfad, Backup-Pfad und Anzahl entfernter
+  Schlüssel/Werte
+- Warnungen (z. B. fehlende Datei) als `WARN`-Einträge
+- Footer `=== Bereinigung abgeschlossen ===`
+
+Nutzbar z. B. für zentrales Sammeln per Logoff-Skript: einfach `-LogPath`
+auf einen freigegebenen Pfad mit eindeutigem Dateinamen pro Benutzer und
+Session setzen.
 
 ## Wichtige Hinweise
 
