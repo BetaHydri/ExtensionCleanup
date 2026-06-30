@@ -19,7 +19,7 @@ param(
     [string]$PreferencesPath = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Preferences",
 
     [Parameter(Mandatory = $false)]
-    [string]$ExtensionsPath  = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Extensions",
+    [string]$ExtensionsPath = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Extensions",
 
     [Parameter(Mandatory = $false)]
     [string]$SecurePreferencesPath = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Secure Preferences",
@@ -42,11 +42,11 @@ function Get-InstalledExtensionIds {
     $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     if (Test-Path -LiteralPath $Path) {
         Get-ChildItem -LiteralPath $Path -Directory -ErrorAction SilentlyContinue |
-            ForEach-Object {
-                if (Test-EdgeExtensionId -Value $_.Name) {
-                    [void]$set.Add($_.Name)
-                }
+        ForEach-Object {
+            if (Test-EdgeExtensionId -Value $_.Name) {
+                [void]$set.Add($_.Name)
             }
+        }
     }
     return $set
 }
@@ -133,6 +133,36 @@ function Invoke-CleanupNode {
 
 $installed = Get-InstalledExtensionIds -Path $ExtensionsPath
 
+function ConvertTo-HashtableDeep {
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$InputObject
+    )
+
+    if ($null -eq $InputObject) {
+        return $null
+    }
+
+    if ($InputObject -is [System.Management.Automation.PSCustomObject]) {
+        $ht = @{}
+        foreach ($prop in $InputObject.PSObject.Properties) {
+            $ht[$prop.Name] = ConvertTo-HashtableDeep -InputObject $prop.Value
+        }
+        return $ht
+    }
+
+    if ($InputObject -is [System.Collections.IList] -and $InputObject -isnot [string]) {
+        $list = [System.Collections.ArrayList]::new()
+        foreach ($item in $InputObject) {
+            [void]$list.Add((ConvertTo-HashtableDeep -InputObject $item))
+        }
+        return $list
+    }
+
+    return $InputObject
+}
+
 function Invoke-CleanupFile {
     param(
         [Parameter(Mandatory = $true)]
@@ -155,7 +185,12 @@ function Invoke-CleanupFile {
     Copy-Item -LiteralPath $Path -Destination $backupPath -Force
 
     $raw = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
-    $json = $raw | ConvertFrom-Json -AsHashtable -Depth 100
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        $json = $raw | ConvertFrom-Json -AsHashtable -Depth 100
+    }
+    else {
+        $json = $raw | ConvertFrom-Json | ConvertTo-HashtableDeep
+    }
 
     $removedKeys = 0
     $removedArrayValues = 0
